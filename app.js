@@ -1,8 +1,16 @@
 (() => {
 'use strict';
-const BANK = window.QUESTION_BANK || [];
+// normalise the bank: each category gets items [{d,q,a}]
+const BANK = (window.QUESTION_BANK || []).map(c => ({
+  ...c,
+  items: (c.q || []).map(x => Array.isArray(x) ? {d: +x[0], q: x[1], a: x[2]} : {d: +x.d, q: x.q, a: x.a})
+    .filter(x => x.d >= 1 && x.d <= 10 && x.q && x.a)
+}));
 const LEVELS = [200, 400, 600];
-const KEY = 'sinjim_state_v1', SEEN_KEY = 'sinjim_seen_v1', SOUND_KEY = 'sinjim_sound';
+// v2: new question bank (difficulty 1–10). Old 'seen' history is discarded.
+const KEY = 'sinjim_state_v2', SEEN_KEY = 'sinjim_seen_v2', SOUND_KEY = 'sinjim_sound';
+const DIFF_LABELS = {1:'سهل جدًا',2:'سهل',3:'سهل',4:'متوسط',5:'متوسط',6:'متوسط',7:'صعب',8:'صعب',9:'صعب جدًا',10:'صعب جدًا'};
+const DIFF_PRESETS = [['سهل',1,3],['متوسط',4,6],['صعب',7,10],['متدرّج',3,7],['الكل',1,10]];
 const COLORS = ['#ef4444','#3b82f6','#22c55e','#f59e0b','#a855f7','#ec4899','#14b8a6','#f97316'];
 const DEFAULT_NAMES = ['الصقور','النمور','الفرسان','النجوم','الأبطال','العقبان','الذيب','الشهب'];
 const $ = s => document.querySelector(s);
@@ -12,15 +20,25 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const freshState = () => ({
   phase: 'setup',
   teams: [{name: DEFAULT_NAMES[0], color: COLORS[0], score: 0}, {name: DEFAULT_NAMES[1], color: COLORS[1], score: 0}],
-  settings: {timer: 60, perLevel: 2},
+  settings: {timer: 60, perLevel: 2, dMin: 3, dMax: 7},
   selected: [],
   board: null,     // [{catId, tiles:[{level,q,a,used,winner}]}]
   turn: 0,
   current: null    // {c, t}
 });
 let S;
-try { S = JSON.parse(localStorage.getItem(KEY)) || freshState(); } catch (e) { S = freshState(); }
+try { S = JSON.parse(localStorage.getItem(KEY)); } catch (e) { S = null; }
+if (!S) { // migrate teams & settings from v1 (but not the old board/questions)
+  S = freshState();
+  try {
+    const old = JSON.parse(localStorage.getItem('sinjim_state_v1'));
+    if (old && old.teams && old.teams.length >= 2) S.teams = old.teams.map(t => ({name: t.name, color: t.color, score: 0}));
+    if (old && old.settings) Object.assign(S.settings, {timer: old.settings.timer || 60, perLevel: old.settings.perLevel || 2});
+  } catch (e) {}
+  try { localStorage.removeItem('sinjim_seen_v1'); localStorage.removeItem('sinjim_state_v1'); } catch (e) {}
+}
 if (!S.teams || S.teams.length < 2) S = freshState();
+S.settings = Object.assign({timer: 60, perLevel: 2, dMin: 3, dMax: 7}, S.settings || {});
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
 let soundOn = localStorage.getItem(SOUND_KEY) !== 'off';
 
@@ -56,6 +74,61 @@ $('#scoreboard').addEventListener('click', e => {
   S.teams[+b.dataset.adj].score += +b.dataset.v; save(); renderScores();
 });
 
+/* ---------- difficulty control ---------- */
+function diffText() {
+  const {dMin, dMax} = S.settings;
+  return dMin === dMax ? `مستوى ${dMin} فقط (${DIFF_LABELS[dMin]})` : `من ${dMin} (${DIFF_LABELS[dMin]}) إلى ${dMax} (${DIFF_LABELS[dMax]})`;
+}
+function diffControlHTML() {
+  const {dMin, dMax} = S.settings;
+  const ticks = Array.from({length: 10}, (_, i) => i + 1).map(n =>
+    `<button class="dtick ${n >= dMin && n <= dMax ? 'on' : ''}" data-dtick="${n}" title="${DIFF_LABELS[n]}">${n}</button>`).join('');
+  return `
+    <div class="diff">
+      <div class="diff-summary">🎚️ الصعوبة: <b id="diffText">${diffText()}</b></div>
+      <div class="dticks">${ticks}</div>
+      <div class="diff-ends"><span>1 = سهل جدًا</span><span>10 = صعب جدًا</span></div>
+      <div class="diff-sliders">
+        <label>أسهل سؤال: <b id="dMinV">${dMin}</b><input type="range" min="1" max="10" step="1" value="${dMin}" id="dMin"></label>
+        <label>أصعب سؤال: <b id="dMaxV">${dMax}</b><input type="range" min="1" max="10" step="1" value="${dMax}" id="dMax"></label>
+      </div>
+      <div class="diff-presets">${DIFF_PRESETS.map(([n, a, b]) => `<button class="chip ${a === dMin && b === dMax ? 'on' : ''}" data-preset="${a},${b}">${n} (${a}–${b})</button>`).join('')}</div>
+      <div class="diff-hint">اضغط رقمين لتحديد نطاق، أو اضغط نفس الرقم مرتين لمستوى واحد. المربعات 200 / 400 / 600 = الثلث الأسهل / الأوسط / الأصعب من النطاق.</div>
+    </div>`;
+}
+let tickAnchor = null;
+function refreshDiffUI() { // update in place so sliders keep working while dragging
+  const {dMin, dMax} = S.settings;
+  app.querySelectorAll('[data-dtick]').forEach(el => { const n = +el.dataset.dtick; el.classList.toggle('on', n >= dMin && n <= dMax); el.classList.toggle('anchor', n === tickAnchor); });
+  app.querySelectorAll('[data-preset]').forEach(el => { const [a, b] = el.dataset.preset.split(',').map(Number); el.classList.toggle('on', a === dMin && b === dMax); });
+  app.querySelectorAll('#diffText, .diff-summary-mini').forEach(el => el.textContent = diffText());
+  const mn = $('#dMin'), mx = $('#dMax');
+  if (mn && +mn.value !== dMin) mn.value = dMin; if (mx && +mx.value !== dMax) mx.value = dMax;
+  if ($('#dMinV')) $('#dMinV').textContent = dMin; if ($('#dMaxV')) $('#dMaxV').textContent = dMax;
+}
+function bindDiffControl(extra) {
+  const onChange = () => { refreshDiffUI(); extra && extra(); };
+  const set = (a, b) => { a = Math.max(1, Math.min(10, a)); b = Math.max(1, Math.min(10, b)); if (a > b) [a, b] = [b, a]; S.settings.dMin = a; S.settings.dMax = b; save(); onChange(); };
+  const mn = $('#dMin'), mx = $('#dMax');
+  mn.oninput = () => { let a = +mn.value; if (a > S.settings.dMax) { S.settings.dMax = a; } S.settings.dMin = a; save(); onChange(); };
+  mx.oninput = () => { let b = +mx.value; if (b < S.settings.dMin) { S.settings.dMin = b; } S.settings.dMax = b; save(); onChange(); };
+  app.querySelectorAll('[data-dtick]').forEach(el => el.onclick = () => {
+    const n = +el.dataset.dtick;
+    if (tickAnchor == null) { tickAnchor = n; set(n, n); } else { const a = tickAnchor; tickAnchor = null; set(a, n); }
+  });
+  app.querySelectorAll('[data-preset]').forEach(el => el.onclick = () => { tickAnchor = null; const [a, b] = el.dataset.preset.split(',').map(Number); set(a, b); });
+}
+// which difficulty levels each tile tier (0=200, 1=400, 2=600) should draw from
+function tierLevels(k) {
+  const {dMin, dMax} = S.settings;
+  if (dMin === dMax) return [dMin];
+  const span = dMax - dMin, lo = dMin + span * k / 3, hi = dMin + span * (k + 1) / 3;
+  const out = [];
+  for (let d = Math.ceil(lo - 1e-9); d <= Math.floor(hi + 1e-9); d++) out.push(d);
+  return out.length ? out : [Math.round((lo + hi) / 2)];
+}
+const inRange = c => c.items.filter(x => x.d >= S.settings.dMin && x.d <= S.settings.dMax).length;
+
 /* ---------- setup ---------- */
 function renderSetup() {
   app.innerHTML = `
@@ -82,6 +155,10 @@ function renderSetup() {
         </label>
       </div>
     </section>
+    <section class="panel">
+      <h2>🎚️ مستوى صعوبة الأسئلة (من 1 إلى 10)</h2>
+      <div id="diffBox">${diffControlHTML()}</div>
+    </section>
     <div class="center"><button class="btn primary big" id="toCats">التالي: اختيار الفئات ⬅️</button></div>
     <p class="footer-note">يُحفظ تقدم اللعبة تلقائيًا في هذا المتصفح</p>`;
   app.querySelectorAll('[data-name]').forEach(el => el.oninput = () => { S.teams[+el.dataset.name].name = el.value; save(); });
@@ -93,6 +170,7 @@ function renderSetup() {
   };
   $('#setTimer').onchange = e => { S.settings.timer = +e.target.value; save(); };
   $('#setPer').onchange = e => { S.settings.perLevel = +e.target.value; save(); };
+  bindDiffControl();
   $('#toCats').onclick = () => {
     S.teams.forEach((t, i) => { t.name = (t.name || '').trim() || `فريق ${i + 1}`; });
     S.phase = 'cats'; save(); render();
@@ -105,10 +183,10 @@ function renderCats() {
   app.innerHTML = `
     <h1>اختر <span class="g">الفئات</span></h1>
     <p class="sub">اختر الفئات التي تريد اللعب بها (المقترح 6 فئات)</p>
+    <details class="panel diff-panel"><summary>🎚️ الصعوبة: <b class="diff-summary-mini">${diffText()}</b> — اضغط للتغيير</summary><div id="diffBox">${diffControlHTML()}</div></details>
     <div class="cat-grid">${BANK.map(c => {
-      const cnt = LEVELS.reduce((a, l) => a + (c.levels[l] || []).length, 0);
       return `<div class="cat-card ${S.selected.includes(c.id) ? 'sel' : ''}" data-cat="${c.id}" role="button" tabindex="0">
-        <span class="ic">${c.icon}</span><div class="nm">${esc(c.name)}</div><div class="ct">${cnt} سؤال</div></div>`;
+        <span class="ic">${c.icon}</span><div class="nm">${esc(c.name)}</div><div class="ct"><span data-incount="${c.id}">${inRange(c)}</span> سؤال ضمن الصعوبة · ${c.items.length} إجمالًا</div></div>`;
     }).join('')}</div>
     <div class="sticky-bar">
       <button class="btn ghost" id="backSetup">➡️ رجوع</button>
@@ -125,6 +203,7 @@ function renderCats() {
     el.onclick = toggle;
     el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
   });
+  bindDiffControl(() => app.querySelectorAll('[data-incount]').forEach(el => { el.textContent = inRange(BANK.find(c => c.id === el.dataset.incount)); }));
   $('#backSetup').onclick = () => { S.phase = 'setup'; save(); render(); };
   $('#randCats').onclick = () => { S.selected = shuffle(BANK.map(c => c.id)).slice(0, 6); save(); render(); };
   $('#startGame').onclick = startGame;
@@ -137,16 +216,19 @@ function startGame() {
   try { seen = JSON.parse(localStorage.getItem(SEEN_KEY)) || {}; } catch (e) {}
   const order = BANK.map(c => c.id).filter(id => S.selected.includes(id));
   S.board = order.map(id => {
-    const cat = BANK.find(c => c.id === id), tiles = [];
-    LEVELS.forEach(l => {
-      const pool = (cat.levels[l] || []).map(x => ({...x, key: id + '|' + l + '|' + x.q}));
-      // prefer questions not seen in previous games
-      let picks = shuffle(pool.filter(x => !seen[x.key]));
-      if (picks.length < S.settings.perLevel) {
-        pool.forEach(x => delete seen[x.key]);
-        picks = picks.concat(shuffle(pool.filter(x => !picks.includes(x))));
-      }
-      picks.slice(0, S.settings.perLevel).forEach(x => { seen[x.key] = 1; tiles.push({level: l, q: x.q, a: x.a, used: false, winner: null}); });
+    const cat = BANK.find(c => c.id === id), tiles = [], used = new Set();
+    const all = cat.items.map(x => ({...x, key: id + '|' + x.q}));
+    LEVELS.forEach((l, k) => {
+      const want = S.settings.perLevel, target = tierLevels(k);
+      const tlo = Math.min(...target), thi = Math.max(...target);
+      const dist = x => x.d < tlo ? tlo - x.d : x.d > thi ? x.d - thi : 0;
+      const avail = all.filter(x => !used.has(x.key));
+      // order: in-tier unseen, in-tier seen, then nearest levels outward (unseen first) — graceful fallback
+      const ranked = shuffle(avail).sort((a, b) => (dist(a) - dist(b)) || ((seen[a.key] ? 1 : 0) - (seen[b.key] ? 1 : 0)));
+      ranked.slice(0, want).forEach(x => {
+        used.add(x.key); seen[x.key] = 1;
+        tiles.push({level: l, d: x.d, q: x.q, a: x.a, used: false, winner: null});
+      });
     });
     return {catId: id, tiles};
   });
@@ -198,6 +280,7 @@ function openQ(c, t, resume) {
   S.current = {c, t, revealed: resume && S.current ? !!S.current.revealed : false}; save();
   $('#qCat').textContent = cat.icon + ' ' + cat.name;
   $('#qPts').textContent = tile.level + ' نقطة';
+  $('#qDiff').textContent = tile.d ? `الصعوبة ${tile.d}/10 · ${DIFF_LABELS[tile.d]}` : '';
   $('#qTurn').innerHTML = `الدور على <b style="color:${team.color}">${esc(team.name)}</b>`;
   $('#qText').textContent = tile.q;
   $('#qAnswer').textContent = '✅ ' + tile.a;
