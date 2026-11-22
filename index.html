@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>سين جيم — تحدي الفرق</title>
+<meta name="theme-color" content="#1b1145">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand" id="brandBtn" title="الرئيسية">🏆 <span>سين جيم</span></div>
+  <div class="scoreboard" id="scoreboard"></div>
+  <div class="top-actions">
+    <button class="icon-btn" id="fsBtn" title="ملء الشاشة">⛶</button>
+    <button class="icon-btn" id="soundBtn" title="الصوت">🔊</button>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<div class="modal hidden" id="qModal">
+  <div class="qcard">
+    <div class="qhead">
+      <span class="qcat" id="qCat"></span>
+      <span class="qpts" id="qPts"></span>
+    </div>
+    <div class="qturn" id="qTurn"></div>
+    <div class="qtext" id="qText"></div>
+    <div class="timer-wrap">
+      <svg viewBox="0 0 120 120" class="timer-svg"><circle cx="60" cy="60" r="52" class="t-bg"/><circle cx="60" cy="60" r="52" class="t-fg" id="tRing"/></svg>
+      <div class="t-num" id="tNum">60</div>
+    </div>
+    <div class="qanswer hidden" id="qAnswer"></div>
+    <div class="qbtns" id="qControls">
+      <button class="btn ghost" id="pauseBtn">⏸️ إيقاف</button>
+      <button class="btn ghost" id="resetTBtn">↺ إعادة الوقت</button>
+      <button class="btn primary" id="showABtn">👁️ إظهار الإجابة</button>
+    </div>
+    <div class="award hidden" id="awardBox">
+      <div class="award-title">من جاوب صح؟</div>
+      <div class="award-btns" id="awardBtns"></div>
+    </div>
+    <button class="close-x" id="qClose" title="رجوع بدون احتساب">✕</button>
+  </div>
+</div>
+
+<canvas id="confetti"></canvas>
+<script src="questions.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
