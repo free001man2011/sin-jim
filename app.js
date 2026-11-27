@@ -7,8 +7,8 @@ const BANK = (window.QUESTION_BANK || []).map(c => ({
     .filter(x => x.d >= 1 && x.d <= 10 && x.q && x.a)
 }));
 const LEVELS = [200, 400, 600];
-// v2: new question bank (difficulty 1–10). Old 'seen' history is discarded.
-const KEY = 'sinjim_state_v2', SEEN_KEY = 'sinjim_seen_v2', SOUND_KEY = 'sinjim_sound';
+// v3: brand-new question bank. Old 'seen' history and boards are discarded; teams & settings are kept.
+const KEY = 'sinjim_state_v3', SEEN_KEY = 'sinjim_seen_v3', SOUND_KEY = 'sinjim_sound';
 const DIFF_LABELS = {1:'سهل جدًا',2:'سهل',3:'سهل',4:'متوسط',5:'متوسط',6:'متوسط',7:'صعب',8:'صعب',9:'صعب جدًا',10:'صعب جدًا'};
 const DIFF_PRESETS = [['سهل',1,3],['متوسط',4,6],['صعب',7,10],['متدرّج',3,7],['الكل',1,10]];
 const COLORS = ['#ef4444','#3b82f6','#22c55e','#f59e0b','#a855f7','#ec4899','#14b8a6','#f97316'];
@@ -28,14 +28,16 @@ const freshState = () => ({
 });
 let S;
 try { S = JSON.parse(localStorage.getItem(KEY)); } catch (e) { S = null; }
-if (!S) { // migrate teams & settings from v1 (but not the old board/questions)
+if (!S) { // migrate teams & settings from older versions (but not the old board/questions)
   S = freshState();
   try {
-    const old = JSON.parse(localStorage.getItem('sinjim_state_v1'));
+    let old = null;
+    for (const k of ['sinjim_state_v2', 'sinjim_state_v1']) { old = JSON.parse(localStorage.getItem(k)); if (old) break; }
     if (old && old.teams && old.teams.length >= 2) S.teams = old.teams.map(t => ({name: t.name, color: t.color, score: 0}));
-    if (old && old.settings) Object.assign(S.settings, {timer: old.settings.timer || 60, perLevel: old.settings.perLevel || 2});
+    if (old && old.settings) Object.assign(S.settings, {timer: old.settings.timer || 60, perLevel: old.settings.perLevel || 2},
+      old.settings.dMin ? {dMin: old.settings.dMin, dMax: old.settings.dMax} : {});
   } catch (e) {}
-  try { localStorage.removeItem('sinjim_seen_v1'); localStorage.removeItem('sinjim_state_v1'); } catch (e) {}
+  try { ['sinjim_seen_v1', 'sinjim_state_v1', 'sinjim_seen_v2', 'sinjim_state_v2'].forEach(k => localStorage.removeItem(k)); } catch (e) {}
 }
 if (!S.teams || S.teams.length < 2) S = freshState();
 S.settings = Object.assign({timer: 60, perLevel: 2, dMin: 3, dMax: 7}, S.settings || {});
